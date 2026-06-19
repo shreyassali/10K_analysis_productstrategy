@@ -103,9 +103,9 @@ export const handler = async (event) => {
     return { statusCode: 400, headers: CORS, body: JSON.stringify({ error: 'Invalid JSON body' }) };
   }
 
-  const { pdfBase64, companyName } = body;
-  if (!pdfBase64) {
-    return { statusCode: 400, headers: CORS, body: JSON.stringify({ error: 'pdfBase64 is required' }) };
+  const { pdfText, companyName } = body;
+  if (!pdfText) {
+    return { statusCode: 400, headers: CORS, body: JSON.stringify({ error: 'pdfText is required' }) };
   }
 
   const apiKey = event.headers['x-api-key'] || process.env.ANTHROPIC_API_KEY;
@@ -116,35 +116,17 @@ export const handler = async (event) => {
   try {
     const client = new Anthropic({ apiKey });
 
-    // Send PDF directly to Claude — it reads it natively, no SEC bot issues
     const message = await client.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 4096,
       system: SYSTEM_PROMPT,
       messages: [{
         role: 'user',
-        content: [
-          {
-            type: 'document',
-            source: {
-              type: 'base64',
-              media_type: 'application/pdf',
-              data: pdfBase64,
-            },
-          },
-          {
-            type: 'text',
-            text: `Analyze this 10-K annual report for ${companyName || 'the company'} and return the PM strategy dashboard JSON. Use real numbers from the document.`,
-          },
-        ],
+        content: `Analyze this 10-K annual report text for ${companyName || 'the company'} and return the PM strategy dashboard JSON. Use real numbers from the document.\n\n10-K text:\n---\n${pdfText}\n---\n\nReturn only the JSON object.`,
       }],
     });
 
-    const rawText = message.content
-      .filter(b => b.type === 'text')
-      .map(b => b.text)
-      .join('');
-
+    const rawText = message.content.filter(b => b.type === 'text').map(b => b.text).join('');
     const clean = rawText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
     const start = clean.indexOf('{');
     const end = clean.lastIndexOf('}');
