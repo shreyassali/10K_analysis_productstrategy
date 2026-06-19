@@ -5,8 +5,8 @@
 [build.environment]
   NODE_VERSION = "20"
 
-# Extend function timeout to 60 seconds (max on Netlify)
 [functions]
+  directory = "netlify/functions"
   node_bundler = "esbuild"
 
 [functions."analyze"]

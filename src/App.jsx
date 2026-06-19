@@ -73,23 +73,23 @@ export default function App() {
     const interval = setInterval(() => setStep(s => Math.min(s + 1, STEPS.length - 1)), 3500);
 
     try {
-      // Extract text in the browser — keeps request body small (text only, not binary PDF)
-      setStep(0);
+      // Step 1: Extract text from PDF in the browser (keeps request small)
       let pdfText;
       try {
         pdfText = await extractTextFromPDF(pdfFile);
       } catch (e) {
-        throw new Error(`Could not read PDF: ${e.message}. Try a different PDF or check it isn't password-protected.`);
+        throw new Error(`Could not read PDF: ${e.message}. Make sure it is not password-protected.`);
       }
 
       if (!pdfText || pdfText.trim().length < 500) {
-        throw new Error('PDF appears to be empty or scanned (image-only). Please use a text-based PDF from SEC EDGAR.');
+        throw new Error('PDF appears to be empty or image-only (scanned). Please use a text-based PDF from SEC EDGAR.');
       }
 
       setStep(2);
 
-      // Send extracted text (~25KB) instead of binary PDF (~10MB base64)
-      const res = await fetch('/.netlify/functions/analyze', {
+      // Step 2: Send extracted text to Netlify function
+      const FUNCTION_URL = '/.netlify/functions/analyze';
+      const res = await fetch(FUNCTION_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -98,7 +98,20 @@ export default function App() {
         body: JSON.stringify({ pdfText, companyName }),
       });
 
-      const json = await res.json();
+      // Read raw text first so we can show it if JSON parsing fails
+      const rawText = await res.text();
+
+      let json;
+      try {
+        json = JSON.parse(rawText);
+      } catch {
+        // If we got HTML back, the function wasn't found
+        if (rawText.trim().startsWith('<')) {
+          throw new Error(`Function not found (got HTML back). Check Netlify dashboard → Functions tab to confirm "analyze" is deployed. HTTP status: ${res.status}`);
+        }
+        throw new Error(`Invalid response from server: ${rawText.slice(0, 200)}`);
+      }
+
       if (!res.ok) throw new Error(json.error || `Server error ${res.status}`);
 
       setDashboard(json.data);
@@ -138,9 +151,7 @@ export default function App() {
       {selected && (
         <div style={{ background: 'var(--green-bg)', border: '0.5px solid var(--green-border)', borderRadius: 'var(--rs)', padding: '9px 14px', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
           <FileText size={14} style={{ color: 'var(--green)', flexShrink: 0 }} />
-          <span style={{ fontSize: 12, color: 'var(--green)', flex: 1 }}>
-            Step 1 — download the {selected.name} FY2024 10-K PDF, then upload it below
-          </span>
+          <span style={{ fontSize: 12, color: 'var(--green)', flex: 1 }}>Step 1 — download the {selected.name} FY2024 10-K PDF, then upload it below</span>
           <a href={selected.pdfUrl} target="_blank" rel="noopener noreferrer"
             style={{ fontSize: 12, fontWeight: 600, color: 'var(--green)', display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
             Download PDF <ExternalLink size={11} />
@@ -148,17 +159,13 @@ export default function App() {
         </div>
       )}
 
-      {/* Upload zone */}
       <div
         style={{
           background: dragOver ? 'var(--blue-bg)' : 'var(--bg2)',
           border: `${dragOver ? '2px' : '1.5px'} dashed ${dragOver ? 'var(--blue)' : pdfFile ? 'var(--green-border)' : 'var(--border2)'}`,
-          borderRadius: 'var(--r)',
-          padding: pdfFile ? '14px 16px' : '28px 16px',
-          marginBottom: 12,
-          textAlign: 'center',
-          cursor: pdfFile ? 'default' : 'pointer',
-          transition: 'all .15s',
+          borderRadius: 'var(--r)', padding: pdfFile ? '14px 16px' : '28px 16px',
+          marginBottom: 12, textAlign: 'center',
+          cursor: pdfFile ? 'default' : 'pointer', transition: 'all .15s',
         }}
         onClick={() => !pdfFile && fileInputRef.current?.click()}
         onDragOver={e => { e.preventDefault(); setDragOver(true); }}
@@ -175,7 +182,7 @@ export default function App() {
             </div>
             <div style={{ flex: 1, textAlign: 'left' }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{pdfFile.name}</div>
-              <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>{formatBytes(pdfFile.size)} · text will be extracted in browser</div>
+              <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>{formatBytes(pdfFile.size)} · text extracted in browser before sending</div>
             </div>
             <button onClick={e => { e.stopPropagation(); clearPdf(); }}
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 4 }}>
@@ -229,7 +236,6 @@ export default function App() {
       )}
 
       {error && <div className="error-box"><strong>Analysis failed:</strong> {error}</div>}
-
       {dashboard && !loading && <Dashboard data={dashboard} company={analyzedCompany} />}
 
       {!pdfFile && !loading && !dashboard && (
