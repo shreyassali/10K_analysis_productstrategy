@@ -22,14 +22,14 @@ const SYSTEM_PROMPT = `You are a senior product strategy analyst. Analyze a 10-K
   },
   "momentum": {
     "segments": [
-      { "name": "Segment name", "revenue": "$XXB", "growth": "↑ +X%", "margin": "~XX% margin", "pct": 45, "color": "#4f8ef7" }
+      { "name": "Segment name", "revenue": "$XXB", "growth": "↑ +X%", "margin": "~XX% margin", "pct": 45, "color": "#185FA5" }
     ]
   },
   "products": {
     "groups": [
       {
         "name": "Group name",
-        "color": "#2dd4a0",
+        "color": "#1D9E75",
         "items": [
           {
             "name": "Product name",
@@ -55,7 +55,7 @@ const SYSTEM_PROMPT = `You are a senior product strategy analyst. Analyze a 10-K
   },
   "threats": {
     "items": [
-      { "level": "High", "title": "Threat title", "text": "Threat description with PM implication for roadmap." },
+      { "level": "High", "title": "Threat title", "text": "Threat description with PM implication." },
       { "level": "Medium", "title": "Threat title", "text": "..." },
       { "level": "Watch", "title": "Threat title", "text": "..." }
     ]
@@ -82,7 +82,7 @@ Rules:
 - When a KPI is not disclosed: value = "not disclosed", source = "track via earnings call"
 - pct in momentum = estimated % of total revenue as integer 0-100
 - modelPill: one of p-blue p-teal p-purple p-amber
-- Segment colors: #4f8ef7 (blue) #2dd4a0 (teal) #a78bfa (purple) #f59e0b (amber) #f87171 (red) #4ade80 (green)
+- Segment colors: #185FA5 (blue) #1D9E75 (teal) #534AB7 (purple) #BA7517 (amber) #A32D2D (red) #3B6D11 (green)
 - Include 6 financial metrics, 3-6 segments, 3-5 product groups (2-5 products each), all 4 matrix quadrants populated, 4-5 threats, 4-5 bets, 3 action columns with 3 items each`;
 
 const CORS = {
@@ -92,52 +92,9 @@ const CORS = {
   'Content-Type': 'application/json',
 };
 
-async function fetch10K(url) {
-  // Use native fetch (Node 18+ built-in — no node-fetch needed)
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20000);
-
-  try {
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-      },
-    });
-    clearTimeout(timer);
-
-    if (!res.ok) throw new Error(`SEC EDGAR returned HTTP ${res.status}`);
-    const html = await res.text();
-
-    return html
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#\d+;/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 18000);
-  } catch (e) {
-    clearTimeout(timer);
-    if (e.name === 'AbortError') throw new Error('Timed out fetching 10-K from SEC EDGAR (>20s)');
-    throw e;
-  }
-}
-
 export const handler = async (event) => {
-  if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 204, headers: CORS };
-  }
-  if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, headers: CORS, body: JSON.stringify({ error: 'Method not allowed' }) };
-  }
+  if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: CORS };
+  if (event.httpMethod !== 'POST') return { statusCode: 405, headers: CORS, body: JSON.stringify({ error: 'Method not allowed' }) };
 
   let body;
   try {
@@ -146,51 +103,48 @@ export const handler = async (event) => {
     return { statusCode: 400, headers: CORS, body: JSON.stringify({ error: 'Invalid JSON body' }) };
   }
 
-  const { url, companyName } = body;
-  if (!url) {
-    return { statusCode: 400, headers: CORS, body: JSON.stringify({ error: 'url is required' }) };
+  const { pdfBase64, companyName } = body;
+  if (!pdfBase64) {
+    return { statusCode: 400, headers: CORS, body: JSON.stringify({ error: 'pdfBase64 is required' }) };
   }
 
   const apiKey = event.headers['x-api-key'] || process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    return {
-      statusCode: 401, headers: CORS,
-      body: JSON.stringify({ error: 'Anthropic API key required — enter it in the UI field' }),
-    };
+    return { statusCode: 401, headers: CORS, body: JSON.stringify({ error: 'Anthropic API key required' }) };
   }
 
-  // Step 1: Fetch 10-K
-  let content;
-  try {
-    content = await fetch10K(url);
-  } catch (e) {
-    return {
-      statusCode: 502, headers: CORS,
-      body: JSON.stringify({ error: `Failed to fetch 10-K: ${e.message}` }),
-    };
-  }
-
-  if (!content || content.length < 500) {
-    return {
-      statusCode: 502, headers: CORS,
-      body: JSON.stringify({ error: 'Fetched 10-K content was too short — the URL may not point to a valid filing' }),
-    };
-  }
-
-  // Step 2: Analyze with Claude
   try {
     const client = new Anthropic({ apiKey });
+
+    // Send PDF directly to Claude — it reads it natively, no SEC bot issues
     const message = await client.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 4096,
       system: SYSTEM_PROMPT,
       messages: [{
         role: 'user',
-        content: `Analyze this 10-K filing for ${companyName || 'the company'} and return the PM strategy dashboard JSON.\n\n10-K content:\n---\n${content}\n---\n\nReturn only the JSON object.`,
+        content: [
+          {
+            type: 'document',
+            source: {
+              type: 'base64',
+              media_type: 'application/pdf',
+              data: pdfBase64,
+            },
+          },
+          {
+            type: 'text',
+            text: `Analyze this 10-K annual report for ${companyName || 'the company'} and return the PM strategy dashboard JSON. Use real numbers from the document.`,
+          },
+        ],
       }],
     });
 
-    const rawText = message.content.filter(b => b.type === 'text').map(b => b.text).join('');
+    const rawText = message.content
+      .filter(b => b.type === 'text')
+      .map(b => b.text)
+      .join('');
+
     const clean = rawText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
     const start = clean.indexOf('{');
     const end = clean.lastIndexOf('}');
@@ -200,9 +154,7 @@ export const handler = async (event) => {
     return { statusCode: 200, headers: CORS, body: JSON.stringify({ data: parsed }) };
 
   } catch (e) {
-    return {
-      statusCode: 500, headers: CORS,
-      body: JSON.stringify({ error: `Analysis failed: ${e.message}` }),
-    };
+    console.error('Error:', e);
+    return { statusCode: 500, headers: CORS, body: JSON.stringify({ error: e.message || 'Analysis failed' }) };
   }
 };
