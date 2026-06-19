@@ -6,13 +6,13 @@ const pillClass = (type) => {
 const threatPill = (l) => ({ High:'p-red', Medium:'p-amber', Watch:'p-blue', Low:'p-gray' }[l] || 'p-gray');
 const betPill = (s) => ({ Explicit:'p-green', Implied:'p-amber', Speculative:'p-purple' }[s] || 'p-gray');
 
-const quadBorder = (label='') => {
+const quadStyle = (label='') => {
   const l = label.toLowerCase();
-  if (l.includes('double')) return { borderColor:'rgba(74,222,128,.4)', labelColor:'#4ade80' };
-  if (l.includes('grow')) return { borderColor:'rgba(167,139,250,.4)', labelColor:'#a78bfa' };
-  if (l.includes('defend')) return { borderColor:'rgba(79,142,247,.4)', labelColor:'#4f8ef7' };
-  if (l.includes('reassess')) return { borderColor:'rgba(248,113,113,.4)', labelColor:'#f87171' };
-  return { borderColor:'var(--border)', labelColor:'var(--text2)' };
+  if (l.includes('double')) return { borderColor:'#3B6D11', labelColor:'#27500A' };
+  if (l.includes('grow'))   return { borderColor:'#7F77DD', labelColor:'#3C3489' };
+  if (l.includes('defend')) return { borderColor:'#378ADD', labelColor:'#0C447C' };
+  if (l.includes('reassess')) return { borderColor:'#E24B4A', labelColor:'#A32D2D' };
+  return { borderColor:'rgba(0,0,0,0.08)', labelColor:'#5a5f72' };
 };
 
 const deltaClass = (d='') => {
@@ -21,7 +21,7 @@ const deltaClass = (d='') => {
   return 'fl';
 };
 
-const colColors = ['#2dd4a0','#a78bfa','#f87171'];
+const colColors = ['#0F6E56','#534AB7','#A32D2D'];
 
 function SecHead({ num, title }) {
   return (
@@ -38,9 +38,8 @@ export default function Dashboard({ data, company }) {
 
   return (
     <div>
-      {/* Company banner */}
       <div className="dash-head">
-        <div className="dash-co-logo" style={{ background: company?.color || '#4f8ef7' }}>
+        <div className="dash-co-logo" style={{ background: company?.color || '#185FA5' }}>
           {company?.logo || snapshot?.company?.[0] || '?'}
         </div>
         <div style={{ flex: 1 }}>
@@ -50,7 +49,6 @@ export default function Dashboard({ data, company }) {
         <span className={`pill ${snapshot?.modelPill || 'p-blue'}`}>{snapshot?.model}</span>
       </div>
 
-      {/* 1 Financial scorecard */}
       <div className="section">
         <SecHead num="1" title="Financial health scorecard" />
         <div className="metric-grid">
@@ -64,7 +62,6 @@ export default function Dashboard({ data, company }) {
         </div>
       </div>
 
-      {/* 2 Revenue momentum */}
       <div className="section">
         <SecHead num="2" title="Revenue momentum map" />
         <div className="card" style={{ paddingBottom: 6 }}>
@@ -79,20 +76,19 @@ export default function Dashboard({ data, company }) {
                 </div>
               </div>
               <div className="bar-track">
-                <div className="bar-fill" style={{ width: `${Math.min(s.pct || 20, 100)}%`, background: s.color || '#4f8ef7' }} />
+                <div className="bar-fill" style={{ width: `${Math.min(s.pct || 20, 100)}%`, background: s.color || '#185FA5' }} />
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* 3 Product catalog */}
       <div className="section">
         <SecHead num="3" title="Per-product catalog with PM KPIs" />
         {(products?.groups || []).map((group, gi) => (
           <div key={gi}>
             <div className="seg-head">
-              <div className="seg-dot" style={{ background: group.color || '#4f8ef7' }} />
+              <div className="seg-dot" style={{ background: group.color || '#185FA5' }} />
               {group.name}
             </div>
             {(group.items || []).map((prod, pi) => (
@@ -117,14 +113,13 @@ export default function Dashboard({ data, company }) {
         ))}
       </div>
 
-      {/* 4 Priority matrix */}
       <div className="section">
         <SecHead num="4" title="Investment priority matrix" />
         <div className="matrix-grid">
           {(matrix?.quadrants || []).map((q, i) => {
-            const { borderColor, labelColor } = quadBorder(q.label);
+            const { borderColor, labelColor } = quadStyle(q.label);
             return (
-              <div className="matrix-quad" key={i} style={{ borderColor }}>
+              <div className="matrix-quad" key={i} style={{ borderColor, borderWidth: '1px' }}>
                 <div className="matrix-label" style={{ color: labelColor }}>{q.label}</div>
                 <div className="matrix-tags">
                   {(q.items || []).map((item, ii) => <span className="matrix-tag" key={ii}>{item}</span>)}
@@ -135,7 +130,6 @@ export default function Dashboard({ data, company }) {
         </div>
       </div>
 
-      {/* 5 Threats */}
       <div className="section">
         <SecHead num="5" title="Competitive threat radar" />
         {(threats?.items || []).map((t, i) => (
@@ -149,7 +143,6 @@ export default function Dashboard({ data, company }) {
         ))}
       </div>
 
-      {/* 6 Strategic bets */}
       <div className="section">
         <SecHead num="6" title="Strategic bets & whitespace" />
         {(bets?.items || []).map((b, i) => (
@@ -164,7 +157,6 @@ export default function Dashboard({ data, company }) {
         ))}
       </div>
 
-      {/* 7 PM actions */}
       <div className="section">
         <SecHead num="7" title="PM action framework" />
         <div className="action-grid">

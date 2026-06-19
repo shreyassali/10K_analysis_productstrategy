@@ -8,8 +8,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
-    "node-fetch": "^3.3.2"
+    "@anthropic-ai/sdk": "^0.39.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",

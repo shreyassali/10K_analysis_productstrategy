@@ -5,6 +5,13 @@
 [build.environment]
   NODE_VERSION = "20"
 
+# Extend function timeout to 60 seconds (max on Netlify)
+[functions]
+  node_bundler = "esbuild"
+
+[functions."analyze"]
+  timeout = 60
+
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
