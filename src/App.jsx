@@ -11,13 +11,28 @@ const COMPANIES = [
 
 const STEPS = [
   'Extracting text from PDF…',
-  'Parsing business overview and products…',
+  'Sending to Claude for analysis…',
   'Extracting segment revenues and KPIs…',
   'Building investment priority matrix…',
   'Analyzing competitive threats…',
   'Synthesizing PM action framework…',
   'Finalizing dashboard…',
 ];
+
+const SYSTEM_PROMPT = `You are a senior product strategy analyst. Analyze a 10-K annual report and return ONLY a valid JSON object, no markdown, no explanation:
+
+{
+  "snapshot": {"company":"string","filing":"Form 10-K","fy":"string","model":"string","modelPill":"p-blue"},
+  "financials": {"metrics":[{"label":"string","value":"string","delta":"string"}]},
+  "momentum": {"segments":[{"name":"string","revenue":"string","growth":"string","margin":"string","pct":30,"color":"#185FA5"}]},
+  "products": {"groups":[{"name":"string","color":"#1D9E75","items":[{"name":"string","tags":["platform"],"desc":"string","kpis":[{"name":"string","value":"string","source":"string"}]}]}]},
+  "matrix": {"quadrants":[{"label":"Double down — high growth + core fit","items":["string"]},{"label":"Grow carefully — high growth, watch margin","items":["string"]},{"label":"Defend & optimize — core but maturing","items":["string"]},{"label":"Reassess — declining or low strategic fit","items":["string"]}]},
+  "threats": {"items":[{"level":"High","title":"string","text":"string"}]},
+  "bets": {"items":[{"signal":"Explicit","title":"string","text":"string","watch":"string"}]},
+  "actions": {"columns":[{"title":"Top 3 product priorities","items":["string","string","string"]},{"title":"Top 3 metrics to instrument","items":["string","string","string"]},{"title":"Top 3 risks to roadmap","items":["string","string","string"]}]}
+}
+
+Rules: use real numbers only, never invent figures, include 6 metrics, 3-5 segments, 3-4 product groups with 2-4 products each, all 4 quadrants populated, 4-5 threats, 4-5 bets.`;
 
 function formatBytes(bytes) {
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' KB';
@@ -37,87 +52,85 @@ export default function App() {
   const fileInputRef = useRef(null);
 
   const companyName = selected?.name || pdfFile?.name?.replace(/\.pdf$/i, '') || 'the company';
-  const canAnalyze = pdfFile && !loading;
+  const canAnalyze = pdfFile && apiKey && !loading;
 
   const selectCompany = (c) => { setSelected(c); setDashboard(null); setError(null); };
 
   const handleFile = (file) => {
     if (!file) return;
     if (file.type !== 'application/pdf') { setError('Please upload a PDF file.'); return; }
-    if (file.size > 50 * 1024 * 1024) { setError('PDF is too large (max 50 MB).'); return; }
+    if (file.size > 50 * 1024 * 1024) { setError('PDF too large (max 50 MB).'); return; }
     setPdfFile(file);
     setDashboard(null);
     setError(null);
   };
 
-  const handleDrop = (e) => {
-    e.preventDefault();
-    setDragOver(false);
-    handleFile(e.dataTransfer.files[0]);
-  };
-
-  const clearPdf = () => {
-    setPdfFile(null);
-    setDashboard(null);
-    setError(null);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
+  const handleDrop = (e) => { e.preventDefault(); setDragOver(false); handleFile(e.dataTransfer.files[0]); };
+  const clearPdf = () => { setPdfFile(null); setDashboard(null); setError(null); if (fileInputRef.current) fileInputRef.current.value = ''; };
 
   const analyze = async () => {
-    if (!pdfFile) return;
+    if (!pdfFile || !apiKey) return;
     setLoading(true);
     setError(null);
     setDashboard(null);
     setStep(0);
 
-    const interval = setInterval(() => setStep(s => Math.min(s + 1, STEPS.length - 1)), 3500);
+    const interval = setInterval(() => setStep(s => Math.min(s + 1, STEPS.length - 1)), 4000);
 
     try {
-      // Step 1: Extract text from PDF in the browser (keeps request small)
+      // Step 1: Extract text from PDF in the browser
       let pdfText;
       try {
         pdfText = await extractTextFromPDF(pdfFile);
       } catch (e) {
-        throw new Error(`Could not read PDF: ${e.message}. Make sure it is not password-protected.`);
+        throw new Error(`Could not read PDF: ${e.message}`);
       }
 
       if (!pdfText || pdfText.trim().length < 500) {
-        throw new Error('PDF appears to be empty or image-only (scanned). Please use a text-based PDF from SEC EDGAR.');
+        throw new Error('PDF appears empty or image-only (scanned). Use a text-based PDF from SEC EDGAR.');
       }
 
-      setStep(2);
+      setStep(1);
 
-      // Step 2: Send extracted text to Netlify function
-      const FUNCTION_URL = '/.netlify/functions/analyze';
-      const res = await fetch(FUNCTION_URL, {
+      // Step 2: Call Anthropic API directly from browser
+      // No Netlify function needed — user's key, no server timeout limits
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(apiKey ? { 'x-api-key': apiKey } : {}),
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-allow-browser': 'true',
         },
-        body: JSON.stringify({ pdfText, companyName }),
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 3000,
+          system: SYSTEM_PROMPT,
+          messages: [{
+            role: 'user',
+            content: `Analyze this 10-K for ${companyName} and return the JSON dashboard.\n\n${pdfText.slice(0, 20000)}`,
+          }],
+        }),
       });
 
-      // Read raw text first so we can show it if JSON parsing fails
-      const rawText = await res.text();
-
-      let json;
-      try {
-        json = JSON.parse(rawText);
-      } catch {
-        // If we got HTML back, the function wasn't found
-        if (rawText.trim().startsWith('<')) {
-          throw new Error(`Function not found (got HTML back). Check Netlify dashboard → Functions tab to confirm "analyze" is deployed. HTTP status: ${res.status}`);
-        }
-        throw new Error(`Invalid response from server: ${rawText.slice(0, 200)}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error?.message || `Anthropic API error ${res.status}`);
       }
 
-      if (!res.ok) throw new Error(json.error || `Server error ${res.status}`);
+      const data = await res.json();
+      const raw = data.content?.filter(b => b.type === 'text')?.map(b => b.text)?.join('') || '';
+      const clean = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      const start = clean.indexOf('{');
+      const end = clean.lastIndexOf('}');
+      if (start === -1) throw new Error('No valid JSON in response');
 
-      setDashboard(json.data);
+      const parsed = JSON.parse(clean.slice(start, end + 1));
+      setDashboard(parsed);
       setAnalyzedCompany(selected || { name: companyName, logo: companyName[0]?.toUpperCase() || '?', color: '#534AB7' });
+
     } catch (err) {
-      setError(err.message || 'Analysis failed. Check your API key and try again.');
+      setError(err.message || 'Analysis failed.');
     } finally {
       clearInterval(interval);
       setLoading(false);
@@ -159,6 +172,7 @@ export default function App() {
         </div>
       )}
 
+      {/* Upload zone */}
       <div
         style={{
           background: dragOver ? 'var(--blue-bg)' : 'var(--bg2)',
@@ -182,7 +196,7 @@ export default function App() {
             </div>
             <div style={{ flex: 1, textAlign: 'left' }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{pdfFile.name}</div>
-              <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>{formatBytes(pdfFile.size)} · text extracted in browser before sending</div>
+              <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>{formatBytes(pdfFile.size)} · text extracted in browser</div>
             </div>
             <button onClick={e => { e.stopPropagation(); clearPdf(); }}
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 4 }}>
@@ -204,13 +218,14 @@ export default function App() {
         )}
       </div>
 
+      {/* API key */}
       <div className="apikey-section">
         <span className="apikey-label">Anthropic API key</span>
         <input className="apikey-input" type="password" placeholder="sk-ant-…"
           value={apiKey} onChange={e => setApiKey(e.target.value)} />
       </div>
       <div className="apikey-hint" style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 14, paddingLeft: 2 }}>
-        Your key is sent only to your server and never stored. Get one at console.anthropic.com
+        Your key goes directly to Anthropic — never stored or logged. Get one at console.anthropic.com
       </div>
 
       <button className="analyze-btn" onClick={analyze} disabled={!canAnalyze}>
@@ -222,7 +237,7 @@ export default function App() {
         ) : (
           <>
             <ChevronRight size={15} />
-            {pdfFile ? `Analyze ${companyName} 10-K` : 'Upload a PDF to get started'}
+            {!pdfFile ? 'Upload a PDF to get started' : !apiKey ? 'Enter your API key above' : `Analyze ${companyName} 10-K`}
           </>
         )}
       </button>
@@ -242,7 +257,7 @@ export default function App() {
         <div className="empty">
           <div className="empty-icon">📄</div>
           <div className="empty-title">Upload a 10-K PDF to get started</div>
-          <div className="empty-sub">Select a company above to get the PDF download link, or upload any 10-K PDF directly</div>
+          <div className="empty-sub">Select a company above to get the PDF link, or drag in any 10-K PDF</div>
         </div>
       )}
     </div>
