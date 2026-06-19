@@ -94,7 +94,7 @@ export default function App() {
     try {
       const base64 = await toBase64(pdfFile);
 
-      const res = await fetch('/api/analyze', {
+      const res = await fetch('/.netlify/functions/analyze', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
